@@ -70,7 +70,7 @@ public class Bench {
     private static void loadDatasetAndIndex(IndexWriter writer, String datasetFilePath) throws IOException {
         BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
         ObjectMapper mapper = new ObjectMapper();
-        File metadataFile = new File(datasetFilePath + "metadata.json");
+        File metadataFile = new File(datasetFilePath + "dataset_dict.json");
 
         JsonNode rootNode = mapper.readTree(metadataFile);
         JsonNode splits = rootNode.get("splits");
