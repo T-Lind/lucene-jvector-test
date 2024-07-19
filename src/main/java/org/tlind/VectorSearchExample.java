@@ -1,13 +1,10 @@
-package org.example;
+package org.tlind;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.KnnVectorField;
 import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.*;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnVectorQuery;
 import org.apache.lucene.search.ScoreDoc;
@@ -23,12 +20,14 @@ public class VectorSearchExample {
         // Set up an analyzer and index writer configuration
         StandardAnalyzer analyzer = new StandardAnalyzer();
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
+//        config.setMergePolicy(NoMergePolicy.INSTANCE);
         IndexWriter writer = new IndexWriter(index, config);
 
         // Add documents with vector fields to the index
         addDoc(writer, "Document 1", new float[]{1.0f, 2.0f, 3.0f});
         addDoc(writer, "Document 2", new float[]{2.0f, 3.0f, 4.0f});
         addDoc(writer, "Document 3", new float[]{3.0f, 4.0f, 5.0f});
+//        writer.forceMerge(1);
         writer.close();
 
         // Perform a vector search
