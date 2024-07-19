@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.KnnFloatVectorField;
-import org.apache.lucene.document.KnnVectorField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.TopDocs;
@@ -26,6 +26,7 @@ import java.util.List;
 public class Bench {
 
     public static void main(String[] args) throws Exception {
+        System.out.println("Heap space available is " + Runtime.getRuntime().maxMemory());
         long startTime = System.currentTimeMillis();
 
         // Create a new index in memory
@@ -34,13 +35,16 @@ public class Bench {
         // Set up an analyzer and index writer configuration
         StandardAnalyzer analyzer = new StandardAnalyzer();
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
+        config.setMergePolicy(NoMergePolicy.INSTANCE);
         IndexWriter writer = new IndexWriter(index, config);
 
-        String jsonFilePath = "/Users/tiernan.lindauer/Desktop/wikipedia-en-dataset/small_train.json";
+        String workingDirectory = System.getProperty("user.dir");
+        String jsonFilePath = args[0];
 
         // Detailed metrics
         ArrayList<Long> indexLatencies = loadDatasetAndIndex(writer, jsonFilePath);
 
+        writer.forceMerge(1);
         writer.close();
 
         long endTime = System.currentTimeMillis();
@@ -66,17 +70,16 @@ public class Bench {
         double error = 1.96 * Math.sqrt((double) sum / indexLatencies.size() * (1 - (double) sum / indexLatencies.size()) / indexLatencies.size());
 
         // Prepare the content for the metrics file
-        metricsContent.append("\tAverage index latency: ").append(averageIndexLatency).append(" milliseconds\n");
-        metricsContent.append("\tMOE: ").append(error).append(" milliseconds\n");
-        metricsContent.append("\tTotal index latency: ").append(sum / 1000.0).append(" seconds\n");
+        metricsContent.append("\t- Average index latency: ").append(averageIndexLatency).append(" milliseconds\n");
+        metricsContent.append("\t- MOE: ").append(error).append(" milliseconds\n");
+        metricsContent.append("\t- Total index latency: ").append(sum / 1000.0).append(" seconds\n");
 
 
         // Print the final metrics
         System.out.println(metricsContent);
 
         // Run an example search
-        // Generate a random query vector of the same dimension as the indexed vectors
-        float[] queryVector = loadQuery("/Users/tiernan.lindauer/Downloads/lucene-jvector-test/src/main/java/org/tlind/examplequery.json");
+        float[] queryVector = loadQuery(workingDirectory + "/src/main/java/org/tlind/examplequery.json");
 
         // Let's perform a basic vector search using a query vector defined above.
         int k = 5; // Number of nearest neighbors
@@ -87,7 +90,7 @@ public class Bench {
         // Display the results
         System.out.println("Found " + topDocs.totalHits + ":");
         for (int i = 0; i < topDocs.scoreDocs.length; i++) {
-            System.out.println("Doc ID: " + topDocs.scoreDocs[i].doc + ", Score: " + topDocs.scoreDocs[i].score);
+            System.out.println("\t- Doc ID: " + topDocs.scoreDocs[i].doc + ", Score: " + topDocs.scoreDocs[i].score);
         }
 
         // Close the index
@@ -111,7 +114,7 @@ public class Bench {
         List<List<Double>> embeddings = data.getEmb();
 
         data = null;
-        System.gc();
+        System.gc();  // Try to free up data
 
         for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
             // Convert List<Double> to float[]
