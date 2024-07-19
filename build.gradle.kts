@@ -14,9 +14,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     implementation("org.apache.lucene:lucene-core:9.9.0")
     implementation("org.apache.lucene:lucene-queryparser:9.0.0")
-    implementation("org.apache.arrow:arrow-memory:8.0.0")
-    implementation("org.apache.arrow:arrow-vector:8.0.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.12.5")
+    implementation("com.fasterxml.jackson.core:jackson-core:2.12.5")
+    implementation("com.fasterxml.jackson.core:jackson-annotations:2.12.5")
 }
 
 tasks.test {
