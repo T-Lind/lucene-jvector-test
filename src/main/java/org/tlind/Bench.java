@@ -1,7 +1,5 @@
 package org.tlind;
 
-import com.opencsv.CSVReader;
-import com.opencsv.exceptions.CsvException;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.KnnVectorField;
@@ -72,25 +70,6 @@ public class Bench {
     private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String csvFilePath) {
         ArrayList<Long> metrics = new ArrayList<>();
         System.out.println("Loading dataset and indexing...");
-        try (CSVReader reader = new CSVReader(new FileReader(csvFilePath))) {
-            List<String[]> rows = reader.readAll();
-            for (int i = 1; i < rows.size(); i++) { // Skip header row
-                String[] row = rows.get(i);
-                String title = row[2]; // Assuming title is the first column
-                System.out.println("Adding document: " + title);
-                String[] embStringArray = row[4].split(","); // Assuming embedding is the second column
-                float[] emb = new float[embStringArray.length];
-                for (int j = 0; j < embStringArray.length; j++) {
-                    emb[j] = Float.parseFloat(embStringArray[j]);
-                }
-                long startTime = System.currentTimeMillis();
-                addDoc(writer, title, emb);
-                long endTime = System.currentTimeMillis();
-                metrics.add(endTime - startTime);
-            }
-        } catch (IOException | CsvException e) {
-            throw new RuntimeException(e);
-        }
         return metrics;
     }
 
