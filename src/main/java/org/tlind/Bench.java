@@ -22,11 +22,18 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.*;
 
 public class Bench {
 
     public static void main(String[] args) throws Exception {
         System.out.println("Heap space available is " + Runtime.getRuntime().maxMemory());
+
+        // Get the current time and date
+        String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
+        System.out.println("Lucene Bench\nTest run on: " + timeStamp + "\n");
+
         long startTime = System.currentTimeMillis();
 
         // Create a new index in memory
@@ -50,16 +57,12 @@ public class Bench {
         long endTime = System.currentTimeMillis();
         long duration = endTime - startTime;
 
-        // Get the current time and date
-        String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
 
         // Prepare metrics content
-        StringBuilder metricsContent = new StringBuilder("Lucene Bench\nTest run on: " + timeStamp + "\n" +
+        StringBuilder metricsContent = new StringBuilder(
                 "Total execution time: " + duration + " milliseconds\n" +
                 "Metrics:\n");
 
-        // Print the metrics to the terminal
-        System.out.println(metricsContent);
 
         // Calculate the average index latency and error bars
         long sum = 0;
@@ -73,7 +76,6 @@ public class Bench {
         metricsContent.append("\t- Average index latency: ").append(averageIndexLatency).append(" milliseconds\n");
         metricsContent.append("\t- MOE: ").append(error).append(" milliseconds\n");
         metricsContent.append("\t- Total index latency: ").append(sum / 1000.0).append(" seconds\n");
-
 
         // Print the final metrics
         System.out.println(metricsContent);
@@ -97,7 +99,7 @@ public class Bench {
         index.close();
     }
 
-    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) {
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException {
         ArrayList<Long> metrics = new ArrayList<>();
         ObjectMapper objectMapper = new ObjectMapper();
 
@@ -114,23 +116,43 @@ public class Bench {
         List<List<Double>> embeddings = data.getEmb();
 
         data = null;
-        System.gc();  // Try to free up data
+        System.gc();
+
+        int numThreads = Runtime.getRuntime().availableProcessors();
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+        List<Future<Long>> futures = new ArrayList<>();
+
+        System.out.println("Indexing " + titles.size() + " documents...");
+
+        ProgressBar progressBar = new ProgressBar(titles.size());
 
         for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
-            // Convert List<Double> to float[]
-            List<Double> embeddingList = embeddings.get(i);
-            float[] embeddingArray = new float[embeddingList.size()];
-            for (int j = 0; j < embeddingList.size(); j++) {
-                embeddingArray[j] = embeddingList.get(j).floatValue();
-            }
+            final int index = i;
+            futures.add(executorService.submit(() -> {
+                // Convert List<Double> to float[]
+                List<Double> embeddingList = embeddings.get(index);
+                float[] embeddingArray = new float[embeddingList.size()];
+                for (int j = 0; j < embeddingList.size(); j++) {
+                    embeddingArray[j] = embeddingList.get(j).floatValue();
+                }
 
-            long start = System.currentTimeMillis();
+                long start = System.currentTimeMillis();
 
-            addDoc(writer, titles.get(i), embeddingArray);
+                addDoc(writer, titles.get(index), embeddingArray);
 
-            long end = System.currentTimeMillis();
-            metrics.add(end - start);
+                long end = System.currentTimeMillis();
+                progressBar.update();
+                return end - start;
+            }));
         }
+
+        for (Future<Long> future : futures) {
+            metrics.add(future.get());
+        }
+
+        executorService.shutdown();
+
+        System.out.println();
 
         return metrics;
     }
