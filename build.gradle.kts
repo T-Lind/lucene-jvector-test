@@ -12,7 +12,7 @@ repositories {
 dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    implementation("org.apache.lucene:lucene-core:9.2.0")
+    implementation("org.apache.lucene:lucene-core:9.9.0")
     implementation("org.apache.lucene:lucene-queryparser:9.0.0")
     implementation("org.apache.arrow:arrow-memory:8.0.0")
     implementation("org.apache.arrow:arrow-vector:8.0.0")

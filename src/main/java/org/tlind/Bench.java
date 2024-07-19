@@ -20,11 +20,8 @@ import org.apache.lucene.store.Directory;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
@@ -43,8 +40,14 @@ public class Bench {
 
         String filePath = "/Users/tiernan.lindauer/Desktop/wikipedia-en-dataset/";
 
+        // Detailed metrics
+        long metadataLoadStartTime = System.currentTimeMillis();
+        long metadataLoadEndTime;
+
         // Load dataset and index documents
+        metadataLoadStartTime = System.currentTimeMillis();
         loadDatasetAndIndex(writer, filePath);
+        metadataLoadEndTime = System.currentTimeMillis();
 
         writer.close();
 
@@ -52,21 +55,16 @@ public class Bench {
         long duration = endTime - startTime;
 
         // Get the current time and date
-        String timeStamp = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
+        String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
 
         // Prepare metrics content
-        String metricsContent = "Test run on: " + timeStamp.replace('_', ' ') + "\n";
-        metricsContent += "Execution time: " + duration + " milliseconds\n";
+        StringBuilder metricsContent = new StringBuilder();
+        metricsContent.append("Test run on: ").append(timeStamp).append("\n");
+        metricsContent.append("Total execution time: ").append(duration).append(" milliseconds\n");
+        metricsContent.append("Metadata loading time: ").append(metadataLoadEndTime - metadataLoadStartTime).append(" milliseconds\n");
 
         // Print the metrics to the terminal
         System.out.println(metricsContent);
-
-        // Save the metrics to a file in the tests/ folder
-        String metricsFilePath = "tests/metrics_" + timeStamp + ".txt";
-        Files.createDirectories(Paths.get("tests"));
-        try (FileWriter fileWriter = new FileWriter(metricsFilePath)) {
-            fileWriter.write(metricsContent);
-        }
     }
 
     private static void loadDatasetAndIndex(IndexWriter writer, String datasetFilePath) throws IOException {
@@ -88,12 +86,15 @@ public class Bench {
                     SeekableReadChannel readChannel = new SeekableReadChannel(channel);
                     ArrowFileReader reader = new ArrowFileReader(readChannel, allocator);
 
+                    long vectorLoadStartTime = System.currentTimeMillis();
                     VectorSchemaRoot root = reader.getVectorSchemaRoot();
                     reader.loadNextBatch();
+                    long vectorLoadEndTime = System.currentTimeMillis();
 
                     VarCharVector titleVector = (VarCharVector) root.getVector("title");
                     Float4Vector embVector = (Float4Vector) root.getVector("emb");
 
+                    long indexStartTime = System.currentTimeMillis();
                     for (int i = 0; i < root.getRowCount(); i++) {
                         String title = titleVector.getObject(i).toString();
                         float[] emb = new float[embVector.getValueCount()];
@@ -103,6 +104,12 @@ public class Bench {
 
                         addDoc(writer, title, emb);
                     }
+                    long indexEndTime = System.currentTimeMillis();
+
+                    System.out.println("Split: " + splitName);
+                    System.out.println("Vector loading time: " + (vectorLoadEndTime - vectorLoadStartTime) + " milliseconds");
+                    System.out.println("Indexing time: " + (indexEndTime - indexStartTime) + " milliseconds");
+
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
