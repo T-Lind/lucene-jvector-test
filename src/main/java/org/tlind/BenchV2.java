@@ -1,5 +1,9 @@
 package org.tlind;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
@@ -22,9 +26,12 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
-public class Bench {
+public class BenchV2 {
     public static void main(String[] args) throws Exception {
 
         // Get the current time and date
@@ -98,60 +105,62 @@ public class Bench {
         index.close();
     }
 
-    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException {
-        // Default to using all available processors
-        return loadDatasetAndIndex(writer, jsonFilePath, Runtime.getRuntime().availableProcessors());
-    }
 
-    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath, int numThreads) throws InterruptedException, ExecutionException {
+
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException, IOException {
         ArrayList<Long> metrics = new ArrayList<>();
         ObjectMapper objectMapper = new ObjectMapper();
+        JsonFactory jsonFactory = objectMapper.getFactory();
 
-        // Read the JSON file into a Data object
-        Data data;
-        try {
-            data = objectMapper.readValue(new File(jsonFilePath), Data.class);
-        } catch (IOException e) {
-            throw new RuntimeException("Error reading JSON file", e);
-        }
-
-        // Extract titles and embeddings
-        List<String> titles = data.getTitle();
-        List<List<Double>> embeddings = data.getEmb();
-
-        List<TitleEmbPair> titleEmbPairs = new ArrayList<>();
-        for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
-            titleEmbPairs.add(new TitleEmbPair(titles.get(i), embeddings.get(i)));
-        }
-
-        data = null;
-        System.gc();
-
+        int numThreads = Runtime.getRuntime().availableProcessors();
         ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
         List<Future<Long>> futures = new ArrayList<>();
 
-        System.out.println("Indexing " + titleEmbPairs.size() + " documents...");
+        try (JsonParser jsonParser = jsonFactory.createParser(new File(jsonFilePath))) {
+            if (jsonParser.nextToken() != JsonToken.START_OBJECT) {
+                throw new IllegalStateException("Expected content to be an object");
+            }
 
-        ProgressBar progressBar = new ProgressBar(titles.size());
+            String fieldName;
+            long totalDocuments = 0;
+            List<TitleEmbPair> batch = new ArrayList<>();
+            int batchSize = 1000; // Adjust this based on your memory constraints and performance needs
 
-        for (int i = 0; i < titleEmbPairs.size(); i++) {
-            final int index = i;
-            futures.add(executorService.submit(() -> {
-                // Convert List<Double> to float[]
-                List<Double> embeddingList = titleEmbPairs.get(index).getEmb();
-                float[] embeddingArray = new float[embeddingList.size()];
-                for (int j = 0; j < embeddingList.size(); j++) {
-                    embeddingArray[j] = embeddingList.get(j).floatValue();
+            while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                fieldName = jsonParser.getCurrentName();
+                if ("title".equals(fieldName) || "emb".equals(fieldName)) {
+                    jsonParser.nextToken();
+                    if (jsonParser.currentToken() == JsonToken.START_ARRAY) {
+                        while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
+                            if ("title".equals(fieldName)) {
+                                String title = jsonParser.getText();
+                                batch.add(new TitleEmbPair(title, null));
+                            } else if ("emb".equals(fieldName)) {
+                                List<Double> emb = objectMapper.readValue(jsonParser, new TypeReference<List<Double>>() {});
+                                if (!batch.isEmpty()) {
+                                    batch.get(batch.size() - 1).setEmb(emb);
+                                }
+                            }
+
+                            if (batch.size() == batchSize) {
+                                processBatch(batch, writer, executorService, futures);
+                                totalDocuments += batch.size();
+                                batch.clear();
+                            }
+                        }
+                    }
+                } else {
+                    jsonParser.skipChildren();
                 }
+            }
 
-                long start = System.currentTimeMillis();
+            // Process any remaining documents in the last batch
+            if (!batch.isEmpty()) {
+                processBatch(batch, writer, executorService, futures);
+                totalDocuments += batch.size();
+            }
 
-                addDoc(writer, titleEmbPairs.get(index).getTitle(), embeddingArray);
-
-                long end = System.currentTimeMillis();
-                progressBar.update();
-                return end - start;
-            }));
+            System.out.println("Indexed " + totalDocuments + " documents");
         }
 
         for (Future<Long> future : futures) {
@@ -160,9 +169,23 @@ public class Bench {
 
         executorService.shutdown();
 
-        System.out.println();
-
         return metrics;
+    }
+
+    private static void processBatch(List<TitleEmbPair> batch, IndexWriter writer, ExecutorService executorService, List<Future<Long>> futures) {
+        for (TitleEmbPair pair : batch) {
+            futures.add(executorService.submit(() -> {
+                float[] embeddingArray = new float[pair.getEmb().size()];
+                for (int j = 0; j < pair.getEmb().size(); j++) {
+                    embeddingArray[j] = pair.getEmb().get(j).floatValue();
+                }
+
+                long start = System.currentTimeMillis();
+                addDoc(writer, pair.getTitle(), embeddingArray);
+                long end = System.currentTimeMillis();
+                return end - start;
+            }));
+        }
     }
 
     private static void addDoc(IndexWriter writer, String title, float[] vector) {

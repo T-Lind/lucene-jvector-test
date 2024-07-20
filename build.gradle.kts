@@ -22,3 +22,8 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// Improves performance of Java vector incubator API, default is preferredBitSize=128
+tasks.withType<JavaExec> {
+    jvmArgs("--add-modules", "jdk.incubator.vector")
+}
