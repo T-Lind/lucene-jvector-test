@@ -26,12 +26,12 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.*;
 
-public class Bench {
+public class BuildIndexLucene {
     private static volatile long maxMemoryUsage = 0;
 
     public static void main(String[] args) throws Exception {
         // Start memory monitoring thread
-        Thread memoryMonitor = new Thread(Bench::monitorMemoryUsage);
+        Thread memoryMonitor = new Thread(BuildIndexLucene::monitorMemoryUsage);
         memoryMonitor.start();
 
         // Get the current time and date

@@ -251,11 +251,21 @@ public class BuildIndexLuceneBQ {
     }
 
     private static byte[] quantizeToByteVector(float[] floatVector) {
-        byte[] byteVector = new byte[floatVector.length];
-        for (int i = 0; i < floatVector.length; i++) {
-            // Normalize and scale float values to byte range [0, 255]
-            byteVector[i] = (byte) ((floatVector[i] + 1) * 127.5); // Assuming floatVector values are in range [-1, 1]
+        // Calculate the mean of the floatVector
+        float sum = 0;
+        for (float value : floatVector) {
+            sum += value;
         }
-        return byteVector;
+        float mean = sum / floatVector.length;
+
+        // Create a byte array to store the result
+        byte[] result = new byte[floatVector.length];
+
+        // Quantize the floatVector to binary values
+        for (int i = 0; i < floatVector.length; i++) {
+            result[i] = (byte) (floatVector[i] > mean ? 1 : 0);
+        }
+
+        return result;
     }
 }
