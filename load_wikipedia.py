@@ -8,6 +8,8 @@ def process_dataset_in_chunks(output_file, max_entries=None, batch_size=1000, ch
     dataset = load_dataset("Cohere/wikipedia-2023-11-embed-multilingual-v3", "en")['train']
     total_size = len(dataset)
 
+    print("Loaded wikipedia dataset. Now processing in chunks...")
+
     # If max_entries is specified, use it, otherwise use the length of the dataset
     if max_entries is None:
         max_entries = total_size

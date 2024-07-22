@@ -56,7 +56,7 @@ public class BuildIndexLucene {
         String txtFilePath = args[0];
 
         float indexLatency = loadDatasetAndIndex(writer, txtFilePath,
-                Runtime.getRuntime().availableProcessors(), 100_000); // Change this to the number of entries to be placed in the index
+                Runtime.getRuntime().availableProcessors(), 5_600_000); // Change this to the number of entries to be placed in the index
 
         logMemoryUsage("after indexing");
 
