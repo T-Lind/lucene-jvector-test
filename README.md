@@ -11,7 +11,7 @@ If you already have Python, pip, and Java installed on your system, you can run 
 
 Of particular interest are the following three programs:
 * `BuildIndexLucene` -- this uses an optimized batch indexing method to build the index. Recommended for large datasets.
-* `BuildIndexLuceneBQ` -- this uses [Binary Quantization]() to reduce the size of the embeddings and the index. Builds upon the batch indexing method present in `BuildIndexLucene`.
+* `BuildIndexLuceneQuantized` -- this uses quantization to reduce the size of the embeddings and the index. Builds upon the batch indexing method present in `BuildIndexLucene`.
 * `BuildIndexLucenePlain` -- this uses the standard Lucene indexing method to build the index. It's not very memory efficient but is useful for comparison and small datasets.
 
 Each program also keeps track of the peak memory usage (via a monitor in a separate thread), which is printed out to the terminal. Memory is analyzed every 100ms but can be changed through the `memorySleepAmount` variable.
