@@ -253,10 +253,16 @@ public class BuildIndexLuceneBQ {
 
     private static byte[] quantizeToByteVector(float[] floatVector) {
         byte[] byteVector = new byte[floatVector.length];
+        float min = -0.35f;  // TODO: Change these values to match the min and max values in the dataset / change BQ implementation
+        float max = 0.35f;
+
         for (int i = 0; i < floatVector.length; i++) {
-            // Normalize and scale float values to byte range [0, 255]
-            byteVector[i] = (byte) ((floatVector[i] + 1) * 127.5); // Assuming floatVector values are in range [-1, 1]
+            // Normalize to [0, 1]
+            float normalized = (floatVector[i] - min) / (max - min);
+            // Scale to [0, 255]
+            byteVector[i] = (byte) (normalized * 255);
         }
         return byteVector;
     }
+
 }
