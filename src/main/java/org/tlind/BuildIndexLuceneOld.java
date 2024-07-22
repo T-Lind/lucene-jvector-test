@@ -28,12 +28,12 @@ import java.util.List;
 import java.util.concurrent.*;
 
 
-public class BenchOld {
+public class BuildIndexLuceneOld {
     private static volatile long maxMemoryUsage = 0;
 
     public static void main(String[] args) throws Exception {
         // Start memory monitoring thread
-        Thread memoryMonitor = new Thread(BenchOld::monitorMemoryUsage);
+        Thread memoryMonitor = new Thread(BuildIndexLuceneOld::monitorMemoryUsage);
         memoryMonitor.start();
 
         // Get the current time and date
