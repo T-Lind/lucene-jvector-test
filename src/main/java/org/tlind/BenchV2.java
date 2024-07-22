@@ -1,9 +1,5 @@
 package org.tlind;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
@@ -12,7 +8,8 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.NoMergePolicy;
+import org.apache.lucene.index.MergePolicy;
+import org.apache.lucene.index.TieredMergePolicy;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.TopDocs;
@@ -26,35 +23,26 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 public class BenchV2 {
     public static void main(String[] args) throws Exception {
-
-        // Get the current time and date
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-
         System.out.println("Lucene Bench\nTest run on: " + timeStamp);
         System.out.println("(Heap space available is " + Runtime.getRuntime().maxMemory() + " bytes)");
 
         long startTime = System.currentTimeMillis();
 
-        // Create a new index in memory
         Directory index = new ByteBuffersDirectory();
-
-        // Set up an analyzer and index writer configuration
         StandardAnalyzer analyzer = new StandardAnalyzer();
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
-        config.setMergePolicy(NoMergePolicy.INSTANCE);
+        MergePolicy mergePolicy = new TieredMergePolicy();
+        config.setMergePolicy(mergePolicy);
         IndexWriter writer = new IndexWriter(index, config);
 
         String workingDirectory = System.getProperty("user.dir");
         String jsonFilePath = args[0];
 
-        // Detailed metrics
         ArrayList<Long> indexLatencies = loadDatasetAndIndex(writer, jsonFilePath);
 
         writer.forceMerge(1);
@@ -63,14 +51,10 @@ public class BenchV2 {
         long endTime = System.currentTimeMillis();
         long duration = endTime - startTime;
 
-
-        // Prepare metrics content
         StringBuilder metricsContent = new StringBuilder(
                 "Total execution time: " + duration + " milliseconds\n" +
                         "Metrics:\n");
 
-
-        // Calculate the average index latency and error bars
         long sum = 0;
         for (long latency : indexLatencies) {
             sum += latency;
@@ -78,114 +62,86 @@ public class BenchV2 {
         double averageIndexLatency = (double) sum / indexLatencies.size();
         double error = 1.96 * Math.sqrt((double) sum / indexLatencies.size() * (1 - (double) sum / indexLatencies.size()) / indexLatencies.size());
 
-        // Prepare the content for the metrics file
         metricsContent.append("\t- Average index latency: ").append(averageIndexLatency).append(" milliseconds\n");
         metricsContent.append("\t- MOE: ").append(error).append(" milliseconds\n");
         metricsContent.append("\t- Total index latency: ").append(sum / 1000.0).append(" seconds\n");
 
-        // Print the final metrics
         System.out.println(metricsContent);
 
-        // Run an example search
         float[] queryVector = loadQuery(workingDirectory + "/src/main/java/org/tlind/examplequery.json");
 
-        // Let's perform a basic vector search using a query vector defined above.
-        int k = 5; // Number of nearest neighbors
+        int k = 5;
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(index));
         KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery("vector", queryVector, k);
         TopDocs topDocs = searcher.search(knnQuery, k);
 
-        // Display the results
         System.out.println("Example Vector Search Query Found " + topDocs.totalHits + ":");
         for (int i = 0; i < topDocs.scoreDocs.length; i++) {
             System.out.println("\t- Doc ID: " + topDocs.scoreDocs[i].doc + ", Score: " + topDocs.scoreDocs[i].score);
         }
 
-        // Close the index
         index.close();
     }
 
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException {
+        return loadDatasetAndIndex(writer, jsonFilePath, Runtime.getRuntime().availableProcessors());
+    }
 
-
-    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException, IOException {
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath, int numThreads) throws InterruptedException, ExecutionException {
         ArrayList<Long> metrics = new ArrayList<>();
         ObjectMapper objectMapper = new ObjectMapper();
-        JsonFactory jsonFactory = objectMapper.getFactory();
 
-        int numThreads = Runtime.getRuntime().availableProcessors();
-        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
-        List<Future<Long>> futures = new ArrayList<>();
-
-        try (JsonParser jsonParser = jsonFactory.createParser(new File(jsonFilePath))) {
-            if (jsonParser.nextToken() != JsonToken.START_OBJECT) {
-                throw new IllegalStateException("Expected content to be an object");
-            }
-
-            String fieldName;
-            long totalDocuments = 0;
-            List<TitleEmbPair> batch = new ArrayList<>();
-            int batchSize = 1000; // Adjust this based on your memory constraints and performance needs
-
-            while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
-                fieldName = jsonParser.getCurrentName();
-                if ("title".equals(fieldName) || "emb".equals(fieldName)) {
-                    jsonParser.nextToken();
-                    if (jsonParser.currentToken() == JsonToken.START_ARRAY) {
-                        while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
-                            if ("title".equals(fieldName)) {
-                                String title = jsonParser.getText();
-                                batch.add(new TitleEmbPair(title, null));
-                            } else if ("emb".equals(fieldName)) {
-                                List<Double> emb = objectMapper.readValue(jsonParser, new TypeReference<List<Double>>() {});
-                                if (!batch.isEmpty()) {
-                                    batch.get(batch.size() - 1).setEmb(emb);
-                                }
-                            }
-
-                            if (batch.size() == batchSize) {
-                                processBatch(batch, writer, executorService, futures);
-                                totalDocuments += batch.size();
-                                batch.clear();
-                            }
-                        }
-                    }
-                } else {
-                    jsonParser.skipChildren();
-                }
-            }
-
-            // Process any remaining documents in the last batch
-            if (!batch.isEmpty()) {
-                processBatch(batch, writer, executorService, futures);
-                totalDocuments += batch.size();
-            }
-
-            System.out.println("Indexed " + totalDocuments + " documents");
+        Data data;
+        try {
+            data = objectMapper.readValue(new File(jsonFilePath), Data.class);
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading JSON file", e);
         }
 
-        for (Future<Long> future : futures) {
+        List<String> titles = data.getTitle();
+        List<List<Double>> embeddings = data.getEmb();
+
+        List<TitleEmbPair> titleEmbPairs = new ArrayList<>();
+        for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
+            titleEmbPairs.add(new TitleEmbPair(titles.get(i), embeddings.get(i)));
+        }
+
+        data = null;
+        System.gc();
+
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+        CompletionService<Long> completionService = new ExecutorCompletionService<>(executorService);
+
+        System.out.println("Indexing " + titleEmbPairs.size() + " documents...");
+
+        ProgressBar progressBar = new ProgressBar(titles.size());
+
+        for (int i = 0; i < titleEmbPairs.size(); i++) {
+            final int index = i;
+            completionService.submit(() -> {
+                List<Double> embeddingList = titleEmbPairs.get(index).getEmb();
+                float[] embeddingArray = new float[embeddingList.size()];
+                for (int j = 0; j < embeddingList.size(); j++) {
+                    embeddingArray[j] = embeddingList.get(j).floatValue();
+                }
+
+                long start = System.currentTimeMillis();
+                addDoc(writer, titleEmbPairs.get(index).getTitle(), embeddingArray);
+                long end = System.currentTimeMillis();
+                progressBar.update();
+                return end - start;
+            });
+        }
+
+        for (int i = 0; i < titleEmbPairs.size(); i++) {
+            Future<Long> future = completionService.take();
             metrics.add(future.get());
         }
 
         executorService.shutdown();
+        System.out.println();
 
         return metrics;
-    }
-
-    private static void processBatch(List<TitleEmbPair> batch, IndexWriter writer, ExecutorService executorService, List<Future<Long>> futures) {
-        for (TitleEmbPair pair : batch) {
-            futures.add(executorService.submit(() -> {
-                float[] embeddingArray = new float[pair.getEmb().size()];
-                for (int j = 0; j < pair.getEmb().size(); j++) {
-                    embeddingArray[j] = pair.getEmb().get(j).floatValue();
-                }
-
-                long start = System.currentTimeMillis();
-                addDoc(writer, pair.getTitle(), embeddingArray);
-                long end = System.currentTimeMillis();
-                return end - start;
-            }));
-        }
     }
 
     private static void addDoc(IndexWriter writer, String title, float[] vector) {
@@ -200,7 +156,6 @@ public class BenchV2 {
     }
 
     private static float[] loadQuery(String queryJsonPath) {
-        // Query file will have a single field "emb"
         ObjectMapper objectMapper = new ObjectMapper();
         Embedding queryList;
         try {
@@ -210,7 +165,6 @@ public class BenchV2 {
         }
 
         float[] query = new float[queryList.getEmb().size()];
-
         for (int i = 0; i < queryList.getEmb().size(); i++) {
             query[i] = queryList.getEmb().get(i).floatValue();
         }
