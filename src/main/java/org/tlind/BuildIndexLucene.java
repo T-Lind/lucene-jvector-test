@@ -28,6 +28,7 @@ import java.util.concurrent.*;
 
 public class BuildIndexLucene {
     private static volatile long maxMemoryUsage = 0;
+    private static final int memorySleepAmount = 100; // Sleep interval in milliseconds
 
     public static void main(String[] args) throws Exception {
         // Start memory monitoring thread
@@ -37,7 +38,7 @@ public class BuildIndexLucene {
         // Get the current time and date
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         System.out.println("Lucene Bench\nTest run on: " + timeStamp);
-        System.out.println("(Heap space available is " + Runtime.getRuntime().maxMemory() + " bytes)");
+        System.out.println("(Heap space available is " + Runtime.getRuntime().maxMemory() / (1024 * 1024) + " MB)");
 
         long startTime = System.currentTimeMillis();
 
@@ -240,7 +241,7 @@ public class BuildIndexLucene {
                 maxMemoryUsage = usedMemory;
             }
             try {
-                Thread.sleep(1000); // Adjust the sleep interval as needed
+                Thread.sleep(memorySleepAmount); // Adjust the sleep interval as needed
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }

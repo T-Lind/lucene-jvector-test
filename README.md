@@ -9,4 +9,8 @@ Of particular interest are the following three programs:
 * `BuildIndexLuceneBQ` -- this uses [Binary Quantization]() to reduce the size of the embeddings and the index. Builds upon the batch indexing method present in `BuildIndexLucene`.
 * `BuildIndexLucenePlain` -- this uses the standard Lucene indexing method to build the index. It's not very memory efficient but is useful for comparison and small datasets.
 
-Each program also keeps track of the peak memory usage (via a monitor in a separate thread), which is printed out to the terminal.
+Each program also keeps track of the peak memory usage (via a monitor in a separate thread), which is printed out to the terminal. Memory is analyzed every 100ms but can be changed through the `memorySleepAmount` variable.
+
+Each program also includes one test search, using the first vector in the dataset. BQ needs to convert it appropriately. Note that it may not appear as having `Doc ID: 0` in the printout due to the batching in multiple threads. However, it still should return a similarity of `1.0` for one vector in the database.
+
+
