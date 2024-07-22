@@ -1,4 +1,3 @@
-// /Users/tiernan.lindauer/Desktop/wikipedia-en-dataset/full_wikipedia_train.txt
 package org.tlind;
 
 import java.io.BufferedReader;
@@ -8,9 +7,8 @@ import java.io.IOException;
 public class RunLoadWikipedia {
 
     public static void main(String[] args) {
-        // Define the output file and max entries
-        String outputFile = "/Users/tiernan.lindauer/Desktop/wikipedia-en-dataset/full_wikipedia_train.txt"; // Replace with your actual path
-        int maxEntries = 500000; // Replace with your actual value, use -1 for max
+        String outputFile = "/path/to/output_file.txt"; // TODO: Replace with your actual path
+        int maxEntries = -1; // TODO: Replace with your actual value, use -1 for max
 
         // Get the current working directory
         String workingDirectory = System.getProperty("user.dir");
