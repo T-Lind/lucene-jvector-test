@@ -7,18 +7,24 @@ import java.io.IOException;
 public class RunLoadWikipedia {
 
     public static void main(String[] args) {
-        String outputFile = "/path/to/output_file.txt"; // TODO: Replace with your actual path
-        int maxEntries = -1; // TODO: Replace with your actual value, use -1 for max
+        // Define the output file and max entries
+        String outputFile = args[0]; // Replace with your actual path -- you can specify as string or use args
+        int maxEntries = -1; // Replace with your actual value, use -1 for max
+
+        // Additional parameters for the datasource, split, and subset. Default is to wikipedia-en database.
+        String datasource = "ashraq/cohere-wiki-embedding-100k"; // Default datasource
+        String split = "train"; // Default split
+        String subset = ""; // Default subset, can be null
 
         // Get the current working directory
         String workingDirectory = System.getProperty("user.dir");
 
         // Build the command to run the bash script with the arguments
         String[] command;
-        if (maxEntries == -1) {
-            command = new String[]{workingDirectory + "/run_load_wikipedia.sh", outputFile};
+        if (subset == null || subset.isEmpty()) {
+            command = new String[]{workingDirectory + "/run_load_wikipedia.sh", outputFile, String.valueOf(maxEntries), datasource, split};
         } else {
-            command = new String[]{workingDirectory + "/run_load_wikipedia.sh", outputFile, String.valueOf(maxEntries)};
+            command = new String[]{workingDirectory + "/run_load_wikipedia.sh", outputFile, String.valueOf(maxEntries), datasource, split, subset};
         }
 
         // Execute the command

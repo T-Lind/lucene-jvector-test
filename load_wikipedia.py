@@ -4,14 +4,18 @@ from tqdm import tqdm
 
 
 # Function to load and process chunks of the dataset
-def process_dataset_in_chunks(output_file, max_entries=None, batch_size=1000, chunk_size=100_000):
-    dataset = load_dataset("Cohere/wikipedia-2023-11-embed-multilingual-v3", "en")['train']
+def process_dataset_in_chunks(path, split, output_file, max_entries=None, batch_size=1000, chunk_size=100_000, subset=None):
+    if not subset:
+        dataset = load_dataset(path)[split]
+    else:
+        dataset = load_dataset(path, subset)[split]
+#     dataset = load_dataset("Cohere/wikipedia-2023-11-embed-multilingual-v3", "en")['train']
     total_size = len(dataset)
 
     print("Loaded wikipedia dataset. Now processing in chunks...")
 
     # If max_entries is specified, use it, otherwise use the length of the dataset
-    if max_entries is None:
+    if max_entries is None or max_entries < 0:
         max_entries = total_size
     else:
         max_entries = min(max_entries, total_size)
@@ -57,7 +61,15 @@ if __name__ == "__main__":
     # Get the max_entries from the second script argument if provided
     max_entries = int(sys.argv[2]) if len(sys.argv) > 2 else None
 
+    # Get the datasource string
+    datasource = sys.argv[3] if len(sys.argv) > 3 else "Cohere/wikipedia-2023-11-embed-multilingual-v3"
+
+    split = sys.argv[4] if len(sys.argv) > 4 else "train"
+
+    subset = sys.argv[5] if len(sys.argv) > 5 else None
+
     print(f"Output file: {output_file}"
           f"\nMax entries: {max_entries}")
 
-    process_dataset_in_chunks(output_file, max_entries, batch_size=1000, chunk_size=100_000)
+    process_dataset_in_chunks(datasource, split, output_file, max_entries, batch_size=1000, chunk_size=100_000, subset=subset)
+

@@ -65,6 +65,8 @@ public class BuildIndexLuceneQuantized {
         float min = minMax[0];
         float max = minMax[1];
 
+        System.out.println("Found max and min used for int8 quantization.");
+
         float indexLatency = loadDatasetAndIndex(writer, txtFilePath,
                 Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex, min, max); // Change this to the number of entries to be placed in the index
 

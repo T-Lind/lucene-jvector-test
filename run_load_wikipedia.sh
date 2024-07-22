@@ -1,17 +1,20 @@
 #!/bin/bash
 
 # Check if the correct number of arguments are provided
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <output_file> [max_entries]"
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <output_file> <max_entries> [datasource] [split] [subset]"
     exit 1
 fi
 
 # Get the output file and max entries from the arguments
 output_file=$1
 max_entries=$2
+datasource=${3:-"Cohere/wikipedia-2023-11-embed-multilingual-v3"}
+split=${4:-"train"}
+subset=$5
 
 # Define the virtual environment directory
-VENV_DIR="load_wikipedia_venv"
+VENV_DIR="venv"
 
 # Check if the virtual environment directory exists
 if [ ! -d "$VENV_DIR" ]; then
@@ -40,12 +43,10 @@ if [ ! -f load_wikipedia.py ]; then
 fi
 
 # Run the load_wikipedia.py script with the provided arguments
-if [ -z "$max_entries" ]; then
-    # If max_entries is not provided, run with only the output_file
-    python load_wikipedia.py "$output_file"
+if [ -z "$subset" ]; then
+    python load_wikipedia.py "$output_file" "$max_entries" "$datasource" "$split"
 else
-    # If max_entries is provided, run with both arguments
-    python load_wikipedia.py "$output_file" "$max_entries"
+    python load_wikipedia.py "$output_file" "$max_entries" "$datasource" "$split" "$subset"
 fi
 
 # Deactivate the virtual environment
