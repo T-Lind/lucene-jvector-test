@@ -8,34 +8,37 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.LogByteSizeMergePolicy;
+import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.*;
 
-public class Bench {
+
+public class BenchOld {
     private static volatile long maxMemoryUsage = 0;
 
     public static void main(String[] args) throws Exception {
         // Start memory monitoring thread
-        Thread memoryMonitor = new Thread(Bench::monitorMemoryUsage);
+        Thread memoryMonitor = new Thread(BenchOld::monitorMemoryUsage);
         memoryMonitor.start();
 
         // Get the current time and date
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
         System.out.println("Lucene Bench\nTest run on: " + timeStamp);
         System.out.println("(Heap space available is " + Runtime.getRuntime().maxMemory() + " bytes)");
 
@@ -47,28 +50,16 @@ public class Bench {
         // Set up an analyzer and index writer configuration
         StandardAnalyzer analyzer = new StandardAnalyzer();
         IndexWriterConfig config = new IndexWriterConfig(analyzer);
-        config.setMergePolicy(new LogByteSizeMergePolicy());
-        config.setRAMBufferSizeMB(256.0);
+        config.setMergePolicy(NoMergePolicy.INSTANCE);
         IndexWriter writer = new IndexWriter(index, config);
 
         String workingDirectory = System.getProperty("user.dir");
-        String txtFilePath = args[0];
+        String jsonFilePath = args[0];
 
-        float indexLatency = loadDatasetAndIndex(writer, txtFilePath,
-                Runtime.getRuntime().availableProcessors(), 100_000); // Change this to the number of entries to be placed in the index
-
-        logMemoryUsage("after indexing");
-
-        System.out.println("\nIndexing complete. Merging segments...");
-
-        long startMergeTime = System.currentTimeMillis();
+        // Detailed metrics
+        ArrayList<Long> indexLatencies = loadDatasetAndIndex(writer, jsonFilePath);
 
         writer.forceMerge(1);
-
-        long endMergeTime = System.currentTimeMillis();
-
-        System.out.println("Merge time: " + (endMergeTime - startMergeTime) + " milliseconds");
-
         writer.close();
 
         long endTime = System.currentTimeMillis();
@@ -78,13 +69,23 @@ public class Bench {
         memoryMonitor.interrupt();
 
         // Prepare metrics content
-        StringBuilder metricsContent = new StringBuilder(
-                "\nTotal execution time: " + duration + " milliseconds\n" +
+        StringBuilder metricsContent = new StringBuilder("Total execution time: " + duration + " milliseconds\n" +
                 "Max memory usage: " + maxMemoryUsage / (1024 * 1024) + " MB\n");
 
 
+        // Calculate the average index latency and error bars
+        long sum = 0;
+        for (long latency : indexLatencies) {
+            sum += latency;
+        }
+        double averageIndexLatency = (double) sum / indexLatencies.size();
+        double error = 1.96 * Math.sqrt((double) sum / indexLatencies.size() * (1 - (double) sum / indexLatencies.size()) / indexLatencies.size());
+
         // Prepare the content for the metrics file
-        metricsContent.append("Average index latency: ").append(indexLatency).append(" milliseconds\n");
+        metricsContent.append("\t- Average index latency: ").append(averageIndexLatency).append(" milliseconds\n");
+        metricsContent.append("\t- MOE: ").append(error).append(" milliseconds\n");
+        metricsContent.append("\t- Total index latency: ").append(sum / 1000.0).append(" seconds\n");
+
 
         // Print the final metrics
         System.out.println(metricsContent);
@@ -108,59 +109,9 @@ public class Bench {
         index.close();
     }
 
-    private static float loadDatasetAndIndex(IndexWriter writer, String txtFilePath) throws InterruptedException, ExecutionException, IOException {
-        return loadDatasetAndIndex(writer, txtFilePath, Runtime.getRuntime().availableProcessors());
-    }
-
-    private static float loadDatasetAndIndex(IndexWriter writer, String txtFilePath, int numThreads) throws InterruptedException, ExecutionException, IOException {
-        return loadDatasetAndIndex(writer, txtFilePath, numThreads, 100_000);
-    }
-
-    private static float loadDatasetAndIndex(IndexWriter writer, String txtFilePath, int numThreads, int nToIndex) throws InterruptedException, ExecutionException, IOException {
-        ConcurrentLinkedQueue<Long> metrics = new ConcurrentLinkedQueue<>();
-
-        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
-        CompletionService<Long> completionService = new ExecutorCompletionService<>(executorService);
-
-        try (BufferedReader br = new BufferedReader(new FileReader(txtFilePath))) {
-            String line;
-            ConcurrentLinkedQueue<TitleEmbPair> batch = new ConcurrentLinkedQueue<>();
-            int batchSize = 1000;
-            ProgressBar progressBar = new ProgressBar(nToIndex);
-
-            while ((line = br.readLine()) != null) {
-                batch.add(parseLine(line));
-
-                if (batch.size() >= batchSize) {
-                    submitBatch(writer, batch, completionService, progressBar);
-                    batch.clear();
-                }
-            }
-
-            if (!batch.isEmpty()) {
-                submitBatch(writer, batch, completionService, progressBar);
-            }
-        }
-
-        for (int i = 0; i < numThreads; i++) {
-            completionService.submit(() -> null);
-        }
-
-        for (int i = 0; i < numThreads; i++) {
-            Future<Long> future = completionService.take();
-            if (future != null) {
-                metrics.add(future.get());
-            }
-        }
-
-        executorService.shutdown();
-
-        long sum = 0;
-        for (long metric : metrics) {
-            sum += metric;
-        }
-
-        return (float) sum / metrics.size();
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath) throws InterruptedException, ExecutionException {
+        // Default to using all available processors
+        return loadDatasetAndIndex(writer, jsonFilePath, Runtime.getRuntime().availableProcessors());
     }
 
     private static void logMemoryUsage(String phase) {
@@ -171,35 +122,66 @@ public class Bench {
         long usedMemoryMB = usedMemory / (1024 * 1024);
         System.out.println("\nMemory used " + phase + ": " + usedMemoryMB + " MB");
     }
+    private static ArrayList<Long> loadDatasetAndIndex(IndexWriter writer, String jsonFilePath, int numThreads) throws InterruptedException, ExecutionException {
+        ArrayList<Long> metrics = new ArrayList<>();
+        ObjectMapper objectMapper = new ObjectMapper();
 
-    private static void submitBatch(IndexWriter writer, ConcurrentLinkedQueue<TitleEmbPair> batch, CompletionService<Long> completionService, ProgressBar progressBar) {
-        for (TitleEmbPair pair : batch) {
-            completionService.submit(() -> {
-                ConcurrentLinkedQueue<Float> embeddingList = pair.getEmb();
+        // Read the JSON file into a Data object
+        Data data;
+        try {
+            data = objectMapper.readValue(new File(jsonFilePath), Data.class);
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading JSON file", e);
+        }
+
+        // Extract titles and embeddings
+        List<String> titles = data.getTitle();
+        List<List<Double>> embeddings = data.getEmb();
+
+        List<TitleEmbPairOld> titleEmbPairs = new ArrayList<>();
+        for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
+            titleEmbPairs.add(new TitleEmbPairOld(titles.get(i), embeddings.get(i)));
+        }
+
+        data = null;
+        System.gc();
+
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+        List<Future<Long>> futures = new ArrayList<>();
+
+        System.out.println("Indexing " + titleEmbPairs.size() + " documents...");
+
+        ProgressBar progressBar = new ProgressBar(titles.size());
+
+        for (int i = 0; i < titleEmbPairs.size(); i++) {
+            final int index = i;
+            futures.add(executorService.submit(() -> {
+                // Convert List<Double> to float[]
+                List<Double> embeddingList = titleEmbPairs.get(index).getEmb();
                 float[] embeddingArray = new float[embeddingList.size()];
-                int j = 0;
-                for (Float vec : embeddingList) {
-                    embeddingArray[j++] = vec;
+                for (int j = 0; j < embeddingList.size(); j++) {
+                    embeddingArray[j] = embeddingList.get(j).floatValue();
                 }
 
                 long start = System.currentTimeMillis();
-                addDoc(writer, pair.getTitle(), embeddingArray);
+
+                addDoc(writer, titleEmbPairs.get(index).getTitle(), embeddingArray);
+
                 long end = System.currentTimeMillis();
                 progressBar.update();
                 return end - start;
-            });
+            }));
         }
-    }
 
-    private static TitleEmbPair parseLine(String line) {
-        String[] parts = line.split("\t");
-        String title = parts[0];
-        String[] embStrs = parts[1].split(",");
-        ConcurrentLinkedQueue<Float> emb = new ConcurrentLinkedQueue<>();
-        for (String embStr : embStrs) {
-            emb.add((float) Double.parseDouble(embStr));
+        for (Future<Long> future : futures) {
+            metrics.add(future.get());
         }
-        return new TitleEmbPair(title, emb);
+
+        executorService.shutdown();
+
+        System.out.println();
+
+        return metrics;
     }
 
     private static void addDoc(IndexWriter writer, String title, float[] vector) {
@@ -214,7 +196,7 @@ public class Bench {
     }
 
     private static float[] loadQuery(String queryJsonPath) {
-        // Query file will have a single field “emb”
+        // Query file will have a single field "emb"
         ObjectMapper objectMapper = new ObjectMapper();
         Embedding queryList;
         try {
@@ -222,6 +204,7 @@ public class Bench {
         } catch (IOException e) {
             throw new RuntimeException("Error reading query JSON file", e);
         }
+
         float[] query = new float[queryList.getEmb().size()];
 
         for (int i = 0; i < queryList.getEmb().size(); i++) {
@@ -230,6 +213,7 @@ public class Bench {
 
         return query;
     }
+
 
     private static void monitorMemoryUsage() {
         MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
@@ -245,5 +229,40 @@ public class Bench {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+}
+
+class TitleEmbPairOld {
+    private String title;
+    private List<Double> emb;
+
+    public TitleEmbPairOld(String title, List<Double> emb) {
+        this.title = title;
+        this.emb = emb;
+    }
+
+    // Getters and setters
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public List<Double> getEmb() {
+        return emb;
+    }
+
+    public void setEmb(List<Double> emb) {
+        this.emb = emb;
+    }
+
+    @Override
+    public String toString() {
+        return "TitleEmbPair{" +
+                "title='" + title + '\'' +
+                ", emb=" + emb +
+                '}';
     }
 }
