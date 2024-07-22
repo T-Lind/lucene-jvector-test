@@ -1,12 +1,13 @@
 package org.tlind;
 
-import java.util.List;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class TitleEmbPair {
     private String title;
-    private List<Double> emb;
+    private ConcurrentLinkedQueue<Float> emb;
 
-    public TitleEmbPair(String title, List<Double> emb) {
+    public TitleEmbPair(String title, ConcurrentLinkedQueue<Float> emb) {
         this.title = title;
         this.emb = emb;
     }
@@ -20,19 +21,11 @@ public class TitleEmbPair {
         this.title = title;
     }
 
-    public List<Double> getEmb() {
+    public ConcurrentLinkedQueue<Float> getEmb() {
         return emb;
     }
 
-    public void setEmb(List<Double> emb) {
+    public void setEmb(ConcurrentLinkedQueue<Float> emb) {
         this.emb = emb;
-    }
-
-    @Override
-    public String toString() {
-        return "TitleEmbPair{" +
-                "title='" + title + '\'' +
-                ", emb=" + emb +
-                '}';
     }
 }

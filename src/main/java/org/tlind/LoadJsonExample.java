@@ -23,7 +23,7 @@ public class LoadJsonExample {
             List<List<Double>> embeddings = data.getEmb();
 
             for (int i = 0; i < titles.size() && i < embeddings.size(); i++) {
-                pairs.add(new TitleEmbPair(titles.get(i), embeddings.get(i)));
+//                pairs.add(new TitleEmbPair(titles.get(i), embeddings.get(i)));
             }
 
             // Create a new SimplifiedData object with the list of TitleEmbPair objects
