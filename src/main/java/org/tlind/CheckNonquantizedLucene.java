@@ -27,13 +27,13 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.*;
 
-public class CheckQuantizedLucene {
+public class CheckNonquantizedLucene {
     private static final int memorySleepAmount = 100; // Sleep interval in milliseconds -- set as needed
     private static final int numberOfVectorsToIndex = 100_000; // Adjust based on your dataset size
     private static volatile long maxMemoryUsage = 0;
 
     public static void main(String[] args) throws Exception {
-        Thread memoryMonitor = new Thread(CheckQuantizedLucene::monitorMemoryUsage);
+        Thread memoryMonitor = new Thread(CheckNonquantizedLucene::monitorMemoryUsage);
         memoryMonitor.start();
 
         String timeStamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
