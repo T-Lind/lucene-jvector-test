@@ -2,6 +2,7 @@ package org.tlind;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.KnnByteVectorField;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
@@ -9,11 +10,14 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LogByteSizeMergePolicy;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
+import org.tlind.KNN;
+import org.tlind.TitleEmbPair;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -24,12 +28,13 @@ import java.lang.management.MemoryUsage;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
 
 public class CheckNonquantizedLucene {
     private static final int memorySleepAmount = 100; // Sleep interval in milliseconds -- set as needed
-    private static final int numberOfVectorsToIndex = 100_000; // Adjust based on your dataset size
+    private static final int numberOfVectorsToIndex = 100000; // Adjust based on your dataset size
     private static volatile long maxMemoryUsage = 0;
 
     public static void main(String[] args) throws Exception {
@@ -59,8 +64,13 @@ public class CheckNonquantizedLucene {
 
         String txtFilePath = args[0];
 
-        loadDatasetAndIndex(groundTruthWriter, txtFilePath, Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex);
-        loadDatasetAndIndex(queryWriter, txtFilePath, Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex);
+        // Find min and max values for quantization
+        float[] minMax = findMinMaxValues(txtFilePath);
+        float min = minMax[0];
+        float max = minMax[1];
+
+        loadDatasetAndIndex(groundTruthWriter, txtFilePath, Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex, min, max, false);
+        loadDatasetAndIndex(queryWriter, txtFilePath, Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex, min, max, true);
 
         logMemoryUsage("after indexing");
 
@@ -92,13 +102,13 @@ public class CheckNonquantizedLucene {
         IndexSearcher querySearcher = new IndexSearcher(DirectoryReader.open(queryIndex));
 
         int k = 5; // Number of nearest neighbors
-        computeMetrics(groundTruthSearcher, querySearcher, txtFilePath, k);
+        computeMetrics(groundTruthSearcher, querySearcher, txtFilePath, min, max, k);
 
         groundTruthIndex.close();
         queryIndex.close();
     }
 
-    private static void loadDatasetAndIndex(IndexWriter writer, String txtFilePath, int numThreads, int nToIndex) throws InterruptedException, ExecutionException, IOException {
+    private static void loadDatasetAndIndex(IndexWriter writer, String txtFilePath, int numThreads, int nToIndex, float min, float max, boolean quantized) throws InterruptedException, ExecutionException, IOException {
         ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
         CompletionService<Void> completionService = new ExecutorCompletionService<>(executorService);
 
@@ -112,13 +122,13 @@ public class CheckNonquantizedLucene {
                 count++;
 
                 if (batch.size() >= batchSize) {
-                    submitBatch(writer, batch, completionService);
+                    submitBatch(writer, batch, completionService, min, max, quantized);
                     batch.clear();
                 }
             }
 
             if (!batch.isEmpty()) {
-                submitBatch(writer, batch, completionService);
+                submitBatch(writer, batch, completionService, min, max, quantized);
             }
         }
 
@@ -133,7 +143,7 @@ public class CheckNonquantizedLucene {
         executorService.shutdown();
     }
 
-    private static void submitBatch(IndexWriter writer, ConcurrentLinkedQueue<TitleEmbPair> batch, CompletionService<Void> completionService) {
+    private static void submitBatch(IndexWriter writer, ConcurrentLinkedQueue<TitleEmbPair> batch, CompletionService<Void> completionService, float min, float max, boolean quantized) {
         for (TitleEmbPair pair : batch) {
             completionService.submit(() -> {
                 float[] embeddingArray = new float[pair.getEmb().size()];
@@ -142,7 +152,12 @@ public class CheckNonquantizedLucene {
                     embeddingArray[j++] = vec;
                 }
 
-                addDoc(writer, pair.getTitle(), embeddingArray);
+                if (quantized) {
+                    byte[] quantizedVector = quantizeToByteVector(embeddingArray, min, max);
+                    addQuantizedDoc(writer, pair.getTitle(), quantizedVector);
+                } else {
+                    addDoc(writer, pair.getTitle(), embeddingArray);
+                }
                 return null;
             });
         }
@@ -150,8 +165,19 @@ public class CheckNonquantizedLucene {
 
     private static void addDoc(IndexWriter writer, String title, float[] vector) {
         Document doc = new Document();
-        doc.add(new TextField("title", title, TextField.Store.YES));
+        doc.add(new TextField("unique_id", title, TextField.Store.YES)); // Use unique ID
         doc.add(new KnnFloatVectorField("vector", vector));
+        try {
+            writer.addDocument(doc);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void addQuantizedDoc(IndexWriter writer, String title, byte[] vector) {
+        Document doc = new Document();
+        doc.add(new TextField("unique_id", title, TextField.Store.YES)); // Use unique ID
+        doc.add(new KnnByteVectorField("vector", vector));
         try {
             writer.addDocument(doc);
         } catch (IOException e) {
@@ -161,13 +187,13 @@ public class CheckNonquantizedLucene {
 
     private static TitleEmbPair parseLine(String line) {
         String[] parts = line.split("\t");
-        String title = parts[0];
-        String[] embStrs = parts[1].split(",");
+        String uniqueId = parts[0]; // Unique ID from the first column
+        String[] embStrs = parts[2].split(","); // Embeddings from the third column
         ConcurrentLinkedQueue<Float> emb = new ConcurrentLinkedQueue<>();
         for (String embStr : embStrs) {
             emb.add((float) Double.parseDouble(embStr));
         }
-        return new TitleEmbPair(title, emb);
+        return new TitleEmbPair(uniqueId, emb);
     }
 
     private static void monitorMemoryUsage() {
@@ -194,12 +220,15 @@ public class CheckNonquantizedLucene {
         System.out.println("\nMemory used " + phase + ": " + usedMemoryMB + " MB");
     }
 
-    private static void computeMetrics(IndexSearcher groundTruthSearcher, IndexSearcher querySearcher, String txtFilePath, int k) throws IOException {
+    private static void computeMetrics(IndexSearcher groundTruthSearcher, IndexSearcher querySearcher, String txtFilePath, float min, float max, int k) throws IOException {
         try (BufferedReader br = new BufferedReader(new FileReader(txtFilePath))) {
             String line;
             int queryCount = 0;
             int totalQueries = 100; // Number of queries to test
             int relevantRetrieved = 0;
+
+            KNN knn = new KNN();
+            knn.loadVectors(txtFilePath);
 
             while ((line = br.readLine()) != null && queryCount < totalQueries) {
                 TitleEmbPair pair = parseLine(line);
@@ -209,20 +238,21 @@ public class CheckNonquantizedLucene {
                     queryVector[j++] = vec;
                 }
 
-                TopDocs groundTruthResults = getNearestNeighbors(groundTruthSearcher, queryVector, k);
-                TopDocs queryResults = getNearestNeighbors(querySearcher, queryVector, k);
+                byte[] quantizedQueryVector = quantizeToByteVector(queryVector, min, max);
 
-                Set<String> groundTruthTitles = new HashSet<>();
+                TopDocs groundTruthResults = getNearestNeighbors(groundTruthSearcher, queryVector, k);
+                TopDocs queryResults = getNearestNeighborsQuantized(querySearcher, quantizedQueryVector, k);
+                List<Vector> knnResults = knn.computeKNN(queryVector, k);
+
+                Set<String> groundTruthIds = new HashSet<>();
                 for (ScoreDoc scoreDoc : groundTruthResults.scoreDocs) {
                     Document doc = groundTruthSearcher.doc(scoreDoc.doc);
-                    String title = doc.get("title");
-                    groundTruthTitles.add(title);
+                    String uniqueId = doc.get("unique_id");
+                    groundTruthIds.add(uniqueId);
                 }
 
-                for (ScoreDoc scoreDoc : queryResults.scoreDocs) {
-                    Document doc = querySearcher.doc(scoreDoc.doc);
-                    String title = doc.get("title");
-                    if (groundTruthTitles.contains(title)) {
+                for (Vector result : knnResults) {
+                    if (groundTruthIds.contains(result.id)) {
                         relevantRetrieved++;
                     }
                 }
@@ -241,5 +271,58 @@ public class CheckNonquantizedLucene {
     private static TopDocs getNearestNeighbors(IndexSearcher searcher, float[] queryVector, int k) throws IOException {
         KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery("vector", queryVector, k);
         return searcher.search(knnQuery, k);
+    }
+
+    private static TopDocs getNearestNeighborsQuantized(IndexSearcher searcher, byte[] queryVector, int k) throws IOException {
+        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery("vector", queryVector, k);
+        return searcher.search(knnQuery, k);
+    }
+
+    private static float[] findMinMaxValues(String txtFilePath) throws IOException {
+        float min = Float.MAX_VALUE;
+        float max = Float.MIN_VALUE;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(txtFilePath))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                TitleEmbPair pair = parseLine(line);
+                for (float value : pair.getEmb()) {
+                    if (value < min) {
+                        min = value;
+                    }
+                    if (value > max) {
+                        max = value;
+                    }
+                }
+            }
+        }
+
+        return new float[]{min, max};
+    }
+
+    private static byte[] quantizeToByteVector(float[] floatVector, float min, float max) {
+        int length = floatVector.length;
+        byte[] result = new byte[length];
+
+        // Edge case: If all values are the same, set all to 0
+        if (min == max) {
+            return result; // All zeros
+        }
+
+        // Quantize the values to the range of int8 [-128, 127]
+        for (int i = 0; i < length; i++) {
+            // Normalize the float value to [0, 1]
+            float normalizedValue = (floatVector[i] - min) / (max - min);
+
+            // Scale and shift to the range [-128, 127]
+            int quantizedValue = Math.round(normalizedValue * 255) - 128;
+
+            // Ensure the value fits in the byte range
+            quantizedValue = Math.max(-128, Math.min(127, quantizedValue));
+
+            result[i] = (byte) quantizedValue;
+        }
+
+        return result;
     }
 }
