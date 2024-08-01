@@ -272,9 +272,7 @@ public class CheckQuantizedLucene {
             double recallQuantized = (double) relevantRetrievedQuantized / (k * totalQueries);
             double accuracyQuantized = recallQuantized;
 
-            System.out.println("Recall (Unquantized): " + recall);
             System.out.println("Accuracy (Unquantized): " + accuracy);
-            System.out.println("Recall (Quantized): " + recallQuantized);
             System.out.println("Accuracy (Quantized): " + accuracyQuantized);
         }
     }
