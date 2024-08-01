@@ -23,6 +23,7 @@ import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.concurrent.*;
 
@@ -212,6 +213,19 @@ public class BuildIndexLucene {
         Document doc = new Document();
         doc.add(new TextField("title", title, TextField.Store.YES));
         doc.add(new KnnFloatVectorField("vector", vector));
+        try {
+            writer.addDocument(doc);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void addDocs(IndexWriter writer, String title, ArrayList<float[]> vectors) {
+        Document doc = new Document();
+        doc.add(new TextField("title", title, TextField.Store.YES));
+        for (float[] vector : vectors) {
+            doc.add(new KnnFloatVectorField("vector", vector));
+        }
         try {
             writer.addDocument(doc);
         } catch (IOException e) {

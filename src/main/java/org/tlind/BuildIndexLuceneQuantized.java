@@ -3,6 +3,7 @@ package org.tlind;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnByteVectorField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.DirectoryReader;
@@ -15,14 +16,15 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
+import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.concurrent.*;
 
@@ -34,6 +36,9 @@ public class BuildIndexLuceneQuantized {
     private static final int numberOfVectorsToIndex = 100_000; // TODO: SET THIS BASED ON THE SIZE OF YOUR DATASET!
 
     private static volatile long maxMemoryUsage = 0;
+
+    public static float min;
+    public static float max;
 
     public static void main(String[] args) throws Exception {
         // Start memory monitoring thread
@@ -58,17 +63,21 @@ public class BuildIndexLuceneQuantized {
         IndexWriter writer = new IndexWriter(index, config);
 
         String workingDirectory = System.getProperty("user.dir");
-        String txtFilePath = args[0];
+        String fvecPath = args[0];
 
         // First pass to find the global min and max values used in int8 quantization
-        float[] minMax = findMinMaxValues(txtFilePath);
-        float min = minMax[0];
-        float max = minMax[1];
+        float[] minMax = VectorFileLoader.findMinAndMax(fvecPath);
+        min = minMax[0];
+        max = minMax[1];
 
         System.out.println("Found max and min used for int8 quantization.");
 
-        float indexLatency = loadDatasetAndIndex(writer, txtFilePath,
-                Runtime.getRuntime().availableProcessors(), numberOfVectorsToIndex, min, max); // Change this to the number of entries to be placed in the index
+        float indexLatency = loadFvecsAndIndex(
+                writer,
+                fvecPath,
+                min,
+                max
+        );
 
         logMemoryUsage("after indexing");
 
@@ -102,19 +111,22 @@ public class BuildIndexLuceneQuantized {
         // Print the final metrics
         System.out.println(metricsContent);
 
-        float[] queryVector = loadQuery(workingDirectory + "/src/main/java/org/tlind/examplequery.json");
-        byte[] queryByteVector = quantizeToByteVector(queryVector, min, max);
-
         // Perform a basic vector search using the quantized byte vector.
         int k = 5; // Number of nearest neighbors
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(index));
-        KnnByteVectorQuery knnQuery = new KnnByteVectorQuery("vector", queryByteVector, k);
-        TopDocs topDocs = searcher.search(knnQuery, k);
 
-        // Display the results
-        System.out.println("Example Vector Search Query Found " + topDocs.totalHits + ":");
-        for (int i = 0; i < topDocs.scoreDocs.length; i++) {
-            System.out.println("\t- Doc ID: " + topDocs.scoreDocs[i].doc + ", Score: " + topDocs.scoreDocs[i].score);
+        // Load fvec queries from  using VectorFileLoader
+        ArrayList<float[]> queries = VectorFileLoader.readFvecs("/Users/tiernan.lindauer/IdeaProjects/jvector/fvec/wikipedia_squad/100k/cohere_embed-english-v3.0_1024_query_vectors_10000.fvec");
+
+        for (float[] query: queries) {
+            byte[] queryByte = quantizeToByteVector(query, min, max);
+            KnnByteVectorQuery knnQuery2 = new KnnByteVectorQuery("vector", queryByte, k);
+            TopDocs topDocs2 = searcher.search(knnQuery2, k);
+
+            System.out.println("Example Vector Search Query Found " + topDocs2.totalHits + ":");
+            for (int i = 0; i < topDocs2.scoreDocs.length; i++) {
+                System.out.println("\t- Doc ID: " + topDocs2.scoreDocs[i].doc + ", Score: " + topDocs2.scoreDocs[i].score);
+            }
         }
 
         // Close the index
@@ -125,22 +137,39 @@ public class BuildIndexLuceneQuantized {
         float min = Float.MAX_VALUE;
         float max = Float.MIN_VALUE;
 
-        try (BufferedReader br = new BufferedReader(new FileReader(txtFilePath))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                TitleEmbPair pair = parseLine(line);
-                for (float value : pair.getEmb()) {
-                    if (value < min) {
-                        min = value;
-                    }
-                    if (value > max) {
-                        max = value;
-                    }
-                }
-            }
-        }
+
 
         return new float[]{min, max};
+    }
+
+    private static float loadFvecsAndIndex(IndexWriter writer, String fvecFilePath, float min, float max) {
+        ProgressBar progressBar = new ProgressBar(numberOfVectorsToIndex);
+        long totalIndexLatency = 0;
+        long count = 0;
+        try (var dis = new DataInputStream(new BufferedInputStream(new FileInputStream(fvecFilePath)))) {
+            while (dis.available() > 0) {
+                var dimension = Integer.reverseBytes(dis.readInt());
+                assert dimension > 0 : dimension;
+                var buffer = new byte[dimension * Float.BYTES];
+                dis.readFully(buffer);
+                var byteBuffer = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN);
+
+                var vector = new float[dimension];
+                var floatBuffer = byteBuffer.asFloatBuffer();
+                floatBuffer.get(vector);
+
+                byte[] byteVector = quantizeToByteVector(vector, min, max);
+                long start = System.currentTimeMillis();
+                addDoc(writer, "title", byteVector);
+                long end = System.currentTimeMillis();
+                totalIndexLatency += end - start;
+                count++;
+                progressBar.update();
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return (float) totalIndexLatency / count;
     }
 
     private static float loadDatasetAndIndex(IndexWriter writer, String txtFilePath, int numThreads, int nToIndex, float min, float max) throws InterruptedException, ExecutionException, IOException {

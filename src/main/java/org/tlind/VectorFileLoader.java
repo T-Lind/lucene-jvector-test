@@ -12,7 +12,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 public class VectorFileLoader {
-
     public static ArrayList<float[]> readFvecs(String filePath) throws IOException {
         var vectors = new ArrayList<float[]>();
         try (var dis = new DataInputStream(new BufferedInputStream(new FileInputStream(filePath)))) {
@@ -30,6 +29,34 @@ public class VectorFileLoader {
             }
         }
         return vectors;
+    }
+
+    public static float[] findMinAndMax(String filePath) throws IOException {
+        float[] minAndMax = new float[2];
+        minAndMax[0] = Float.MAX_VALUE;
+        minAndMax[1] = Float.MIN_VALUE;
+        try (var dis = new DataInputStream(new BufferedInputStream(new FileInputStream(filePath)))) {
+            while (dis.available() > 0) {
+                var dimension = Integer.reverseBytes(dis.readInt());
+                assert dimension > 0 : dimension;
+                var buffer = new byte[dimension * Float.BYTES];
+                dis.readFully(buffer);
+                var byteBuffer = ByteBuffer.wrap(buffer).order(ByteOrder.LITTLE_ENDIAN);
+
+                var vector = new float[dimension];
+                var floatBuffer = byteBuffer.asFloatBuffer();
+                floatBuffer.get(vector);
+                for (int i = 0; i < vector.length; i++) {
+                    if (vector[i] < minAndMax[0]) {
+                        minAndMax[0] = vector[i];
+                    }
+                    if (vector[i] > minAndMax[1]) {
+                        minAndMax[1] = vector[i];
+                    }
+                }
+            }
+        }
+        return minAndMax;  // minAndMax[0] is min, minAndMax[1] is max
     }
 
     public static ArrayList<Set<Integer>> readIvecs(String filename) {
