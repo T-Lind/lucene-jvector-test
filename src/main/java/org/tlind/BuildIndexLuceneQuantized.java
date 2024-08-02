@@ -118,6 +118,7 @@ public class BuildIndexLuceneQuantized {
         // Load fvec queries from  using VectorFileLoader
         ArrayList<float[]> queries = VectorFileLoader.readFvecs("/Users/tiernan.lindauer/IdeaProjects/jvector/fvec/wikipedia_squad/100k/cohere_embed-english-v3.0_1024_query_vectors_10000.fvec");
 
+        int queryIndex = 0;
         for (float[] query: queries) {
             byte[] queryByte = quantizeToByteVector(query, min, max);
             KnnByteVectorQuery knnQuery2 = new KnnByteVectorQuery("vector", queryByte, k);
@@ -126,6 +127,10 @@ public class BuildIndexLuceneQuantized {
             System.out.println("Example Vector Search Query Found " + topDocs2.totalHits + ":");
             for (int i = 0; i < topDocs2.scoreDocs.length; i++) {
                 System.out.println("\t- Doc ID: " + topDocs2.scoreDocs[i].doc + ", Score: " + topDocs2.scoreDocs[i].score);
+            }
+            queryIndex++;
+            if (queryIndex > 10) {
+                break;
             }
         }
 
@@ -313,20 +318,18 @@ public class BuildIndexLuceneQuantized {
             return result; // All zeros
         }
 
-        // Quantize the values to the range of int8 [-128, 127]
         for (int i = 0; i < length; i++) {
             // Normalize the float value to [0, 1]
             float normalizedValue = (floatVector[i] - min) / (max - min);
 
-            // Scale and shift to the range [-128, 127]
-            int quantizedValue = Math.round(normalizedValue * 255) - 128;
+            // Scale and shift to the range [0, 255]
+            int quantizedValue = Math.round(normalizedValue * 255);
 
-            // Ensure the value fits in the byte range
-            quantizedValue = Math.max(-128, Math.min(127, quantizedValue));
-
-            result[i] = (byte) quantizedValue;
+            // Convert to the byte range [-128, 127]
+            result[i] = (byte) (quantizedValue - 128);
         }
 
         return result;
     }
+
 }
