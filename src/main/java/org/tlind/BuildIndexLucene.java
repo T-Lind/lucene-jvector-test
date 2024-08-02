@@ -152,6 +152,7 @@ public class BuildIndexLucene {
         long count = 0;
         try (var dis = new DataInputStream(new BufferedInputStream(new FileInputStream(fvecFilePath)))) {
             while (dis.available() > 0) {
+                long start = System.currentTimeMillis();
                 var dimension = Integer.reverseBytes(dis.readInt());
                 assert dimension > 0 : dimension;
                 var buffer = new byte[dimension * Float.BYTES];
@@ -162,7 +163,6 @@ public class BuildIndexLucene {
                 var floatBuffer = byteBuffer.asFloatBuffer();
                 floatBuffer.get(vector);
 
-                long start = System.currentTimeMillis();
                 addDoc(writer, "title", vector);
                 long end = System.currentTimeMillis();
                 totalIndexLatency += end - start;

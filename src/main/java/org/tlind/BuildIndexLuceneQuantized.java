@@ -22,6 +22,7 @@ import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -153,6 +154,7 @@ public class BuildIndexLuceneQuantized {
         long count = 0;
         try (var dis = new DataInputStream(new BufferedInputStream(new FileInputStream(fvecFilePath)))) {
             while (dis.available() > 0) {
+                long start = System.currentTimeMillis();
                 var dimension = Integer.reverseBytes(dis.readInt());
                 assert dimension > 0 : dimension;
                 var buffer = new byte[dimension * Float.BYTES];
@@ -164,7 +166,6 @@ public class BuildIndexLuceneQuantized {
                 floatBuffer.get(vector);
 
                 byte[] byteVector = quantizeToByteVector(vector, min, max);
-                long start = System.currentTimeMillis();
                 addDoc(writer, "title", byteVector);
                 long end = System.currentTimeMillis();
                 totalIndexLatency += end - start;
@@ -331,5 +332,4 @@ public class BuildIndexLuceneQuantized {
 
         return result;
     }
-
 }
